@@ -1,0 +1,12 @@
+{
+  "name": "code-refs",
+  "owner": { "name": "sirlens" },
+  "description": "Claude Code mod that turns code references in answers into links that open the code in a side pane.",
+  "plugins": [
+    {
+      "name": "code-refs",
+      "source": "./",
+      "description": "Turns file:line references and code symbols in Claude's answers into clickable links that open the code, and the changes of the session, in a side pane. Read-only on your files; one small model call to disambiguate symbols."
+    }
+  ]
+}

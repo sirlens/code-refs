@@ -1,0 +1,18 @@
+# Archivos que Claude Code genera al cargar el mod.
+.claude-plugin/types/
+tsconfig.json
+
+# Dependencias
+node_modules/
+
+# Editor y sistema operativo
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Bitacoras
+*.log

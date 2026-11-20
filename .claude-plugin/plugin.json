@@ -1,0 +1,23 @@
+{
+  "name": "code-refs",
+  "version": "0.1.0",
+  "description": "Turns file:line references and code symbols in Claude's answers into clickable links that open the code, and the changes of the session, in a side pane. Read-only on your files; one small model call to disambiguate symbols.",
+  "author": {
+    "name": "sirlens",
+    "url": "https://github.com/sirlens"
+  },
+  "homepage": "https://github.com/sirlens/code-refs",
+  "repository": "https://github.com/sirlens/code-refs",
+  "license": "MIT",
+  "keywords": [
+    "code",
+    "references",
+    "links",
+    "git",
+    "diff",
+    "navigation",
+    "side-pane"
+  ],
+  "types": "./types/index.d.ts",
+  "icon": "./.claude-plugin/icon.png"
+}
