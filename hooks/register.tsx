@@ -26,6 +26,7 @@ import {
 } from './lib'
 import type { Ask, Hit, Ref, Resolver } from './lib'
 
+const PLUGIN = 'code-refs'
 const PANE = 'code-refs'
 const ENABLED_KEY = 'enabled'
 const MAX_CANDIDATES = 50
@@ -42,7 +43,6 @@ const edited = atom({ plugin: 'code-refs', key: 'edited' } as const, [] as strin
   shape: 'edited-1',
 })
 const last = atom({ plugin: 'code-refs', key: 'last' } as const, [] as Touch[], { shape: 'last-1' })
-// Numero de mensaje del usuario y los archivos modificados en el mas reciente que modifico algo.
 const turnNo = atom({ plugin: 'code-refs', key: 'turnNo' } as const, 0, { shape: 'turn-1' })
 const recent = atom({ plugin: 'code-refs', key: 'recent' } as const, { turn: 0, files: [] } as Recent, {
   shape: 'recent-1',
@@ -50,10 +50,8 @@ const recent = atom({ plugin: 'code-refs', key: 'recent' } as const, { turn: 0, 
 const recentReads = atom({ plugin: 'code-refs', key: 'recentReads' } as const, { turn: 0, files: [] } as Recent, {
   shape: 'recent-1',
 })
-// Si la regla ya viaja en la conversacion: se vuelve a mandar tras compactar, /clear o activar.
 const ruleSent = atom({ plugin: 'code-refs', key: 'ruleSent' } as const, false, { shape: 'rule-1' })
 
-// Regla para el agente; viaja como contexto oculto del mensaje, solo con el mod encendido.
 const AGENT_RULE = [
   'code-refs is on. Every code symbol you write in backticks in prose (class, method, field, function,',
   'variable) must be a markdown link to its definition: label = the symbol in backticks, target =',
@@ -72,8 +70,6 @@ type Sh = {
   process: { run: (argv: string[], init?: { cwd?: string }) => Promise<{ exitCode: number; stdout: string }> }
 }
 
-// ---- git (solo lectura) --------------------------------------------------
-
 async function git($: Sh, root: string, argv: string[]): Promise<{ ok: boolean; out: string }> {
   try {
     const r = await $.process.run(['git', ...argv], { cwd: root })
@@ -83,7 +79,6 @@ async function git($: Sh, root: string, argv: string[]): Promise<{ ok: boolean; 
   }
 }
 
-// Raiz del repo: la del cwd de la sesion; si no es repo, el propio cwd.
 let rootCache: { cwd: string; root: string } | null = null
 async function getRoot($: Sh): Promise<string> {
   const cwd = await $.session.cwd()
@@ -94,7 +89,7 @@ async function getRoot($: Sh): Promise<string> {
   return root
 }
 
-// Lista de archivos cacheada; se refresca cuando una busqueda no encuentra nada.
+// Cache; se refresca cuando una busqueda no encuentra nada.
 let filesCache: { root: string; files: string[] } | null = null
 async function listFiles($: Sh, root: string, refresh: boolean): Promise<string[]> {
   if (!refresh && filesCache && filesCache.root === root) return filesCache.files
@@ -103,8 +98,6 @@ async function listFiles($: Sh, root: string, refresh: boolean): Promise<string[
   filesCache = { root, files }
   return files
 }
-
-// ---- navegacion -------------------------------------------------------------
 
 // `update` lleva el `$` completo; aqui basta con tiparlo suelto.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -115,15 +108,14 @@ async function setView($: any, next: Partial<View>) {
   void pinWindow($)
 }
 
-// Deja la ventana del motor sobre la cabecera (salta la fila de relleno de arriba); a partir
-// de ahi el scroll de la persona solo mueve el contenido.
+// Deja la ventana del motor sobre la cabecera (salta la fila de relleno); desde ahi el scroll
+// de la persona solo mueve el contenido.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function pinWindow($: any) {
   try {
     await $.clock.sleep(80)
     await $.ui.scroll({ to: { key: 'hdr' }, in: PANE, block: 'start' })
   } catch {
-    // Panel cerrado o aun sin dibujar: no hay nada que colocar.
   }
 }
 
@@ -140,9 +132,8 @@ async function showResult($: any, name: string, items: RefSel[], symbol: string 
   await bringToFront($)
 }
 
-// Con varios paneles el motor muestra uno y deja el resto como pestanas; solo `focus` trae
-// este al frente, y lo rechaza si otro panel tiene el teclado. Ahi se avisa con un toast
-// para que el clic nunca parezca no haber hecho nada.
+// Con varios paneles solo `focus` trae este al frente, y el motor lo rechaza si otro panel tiene
+// el teclado: ahi un toast evita que el clic parezca no haber hecho nada.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function bringToFront($: any) {
   await $.ui.open({ id: PANE, title: 'Code refs', focus: true })
@@ -152,7 +143,6 @@ async function bringToFront($: any) {
       $.ui.toast('Code refs actualizado: cambia a su pestana para verlo')
     }
   } catch {
-    // Sin lista de paneles no hay a quien avisar; el panel ya quedo actualizado.
   }
 }
 
@@ -165,14 +155,12 @@ async function openRef($: any, ref: Ref) {
   await showResult($, name, cands.map(path => ({ path, start: ref.start, end: ref.end, head: ref.head })))
 }
 
-// Fuera de la busqueda de simbolos: documentacion, specs y traducciones.
 const NOT_CODE = [
   ':(exclude)*.md', ':(exclude)*.arb', ':(exclude)*.json', ':(exclude)*.txt',
   ':(exclude).specify/**', ':(exclude)openspec/**', ':(exclude)specs/**', ':(exclude)docs/**',
 ]
 
-// Referencias archivo:linea vistas en las respuestas de la sesion; solo ordenan candidatos.
-// Se repuebla sola al redibujar los mensajes tras una recarga.
+// Solo ordenan candidatos; se repuebla al redibujar los mensajes tras una recarga.
 const seenRefs: Ref[] = []
 
 function remember(refs: readonly Ref[]) {
@@ -183,9 +171,10 @@ function remember(refs: readonly Ref[]) {
   }
 }
 
-// Un simbolo sin link exacto nunca se resuelve adivinando: con una sola definicion en el repo
-// se abre; con varias se listan todas, primero las que el contexto senala (rango citado en el
-// mismo bloque, archivo citado, referencias de la sesion, archivos leidos en el turno).
+/**
+ * Un simbolo sin link exacto nunca se adivina: con una definicion se abre; con varias se listan,
+ * primero las que el contexto senala.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function openSymbol($: any, name: string, ctx: Ref[]) {
   const found = await findDefs($, name, ctx)
@@ -195,7 +184,7 @@ async function openSymbol($: any, name: string, ctx: Ref[]) {
 
 const toSel = (h: Hit): RefSel => ({ path: h.path, start: h.line, end: h.line, head: false })
 
-// Definiciones de un simbolo ordenadas por contexto, y sus apariciones por si no hay ninguna.
+/** Definiciones de un simbolo ordenadas por contexto, y sus apariciones si no hay ninguna. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function findDefs($: any, name: string, ctx: readonly Ref[]): Promise<{ defs: Hit[]; uses: Hit[] }> {
   const root = await getRoot($)
@@ -210,14 +199,13 @@ async function findDefs($: any, name: string, ctx: readonly Ref[]): Promise<{ de
   return { defs, uses }
 }
 
-// ---- simbolos que el agente dejo sin link ---------------------------------------
-
 const MAX_ASKS = 15
 const MAX_ASK_CANDIDATES = 40
 
-// Al terminar una respuesta: cada simbolo sin link se busca en git; con una sola definicion
-// queda resuelto, y los ambiguos se le preguntan juntos al modelo, que solo elige de la lista
-// real. Lo que queda sin definicion, o sin elegir, se marca con `?` para pedirlo al agente.
+/**
+ * Al terminar una respuesta resuelve cada simbolo sin link: una definicion queda resuelta, las
+ * ambiguas las elige el modelo de la lista real; sin definicion o sin elegir queda marcado con `?`.
+ */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function resolveReply($: any, answer: string) {
   const rw = rewriteRefs(answer)
@@ -248,7 +236,6 @@ async function resolveReply($: any, answer: string) {
   await update($, resolved, (list: Resolution[]) => [...list, ...found].slice(-500))
 }
 
-// Busca un simbolo en lo ya resuelto por el nombre y la linea donde aparece en el mensaje.
 function resolverFrom(list: readonly Resolution[]): Resolver {
   return (name, line) => {
     const hit = [...list].reverse().find(r => r.name === name && r.lines.includes(line))
@@ -258,54 +245,99 @@ function resolverFrom(list: readonly Resolution[]): Resolver {
   }
 }
 
-// El pedido corre en un subagente en segundo plano (fork: hereda la conversacion, asi sabe
-// donde se menciono el simbolo); su reporte se muestra en el panel y no llega al chat principal.
+// Subagente en segundo plano (fork: hereda la conversacion, asi sabe donde se menciono el simbolo);
+// su reporte se muestra en el panel y no llega al chat principal.
 const askPrompt = (name: string) =>
   [
     `Locate the definition of \`${name}\` that you mentioned in your last answer (CodeGraph or grep).`,
-    'Do not edit any file. Reply briefly, in the language of the conversation: first line exactly',
+    'You can only read: any write is denied. Reply briefly, in the language of the conversation: first line exactly',
     `[\`${name}\`](code:<repo-relative path>:<line>), then one line saying what it is.`,
     'If it has no definition in the repository (not code, or external), say so in one line, with no link.',
   ].join(' ')
+
+const HANDBACK_TOOL = 'SubagentHandback'
+
+// El agentId se guarda cuando spawn resuelve: un reporte que llega antes espera a los
+// lanzamientos en curso para saber si es de este mod.
+const launching = new Set<Promise<unknown>>()
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function askAgent($: any, name: string) {
   const answer: Answer = { symbol: name, status: 'asking', text: '', ref: null }
   await setView($, { tab: 'code', ref: null, pending: null, missing: null, selected: null, symbol: name, answer })
-  const r = await $.agent
+  const spawn = $.agent
     .spawn({ prompt: askPrompt(name), subagentType: 'fork', description: `Ubicar ${name}` })
     .catch((err: unknown) => ({ deny: String(err) }))
+  const stored = spawn.then(async (r: { agentId?: string; deny?: string }) => {
+    if (r.deny === undefined && r.agentId) await update($, asking, (m: Record<string, string>) => ({ ...m, [r.agentId as string]: name }))
+  })
+  launching.add(stored)
+  const r = await spawn
+  await stored.finally(() => launching.delete(stored))
   if (r.deny !== undefined || !r.agentId) {
-    await setView($, { answer: { ...answer, status: 'failed', text: `No se pudo lanzar el subagente: ${r.deny ?? 'sin id'}` } })
+    await showAnswer($, { ...answer, status: 'failed', text: `No se pudo lanzar el subagente: ${r.deny ?? 'sin id'}` })
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function askedSymbol($: any, agentId: string): Promise<string | undefined> {
+  const known = (await read($, asking))[agentId]
+  if (known !== undefined || launching.size === 0) return known
+  await Promise.allSettled([...launching])
+  return (await read($, asking))[agentId]
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function isOwnAgent($: any, agentId: string | undefined, origin: string): Promise<boolean> {
+  if (agentId === undefined) return false
+  return origin === PLUGIN || (await askedSymbol($, agentId)) !== undefined
+}
+
+const linkedName = (label: string) =>
+  label.replace(/\\(.)/g, '$1').replace(/`/g, '').replace(/\([^()]*\)/g, '').match(/[A-Za-z_$][\w$]*/g)?.pop()
+
+// El reporte es texto del modelo: solo un link con la etiqueta del simbolo pedido, a un archivo
+// del repo, resuelve el `?`.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function codeRefFor($: any, text: string, name: string): Promise<RefSel | null> {
+  const root = await getRoot($)
+  for (const m of text.matchAll(/\[((?:[^\]\n\\]|\\.)+)\]\(code:([^)\s]+)\)/g)) {
+    if (linkedName(m[1] ?? '') !== name) continue
+    const ref = m[2] ? parseCodeTarget(m[2]) : undefined
+    if (!ref || !isSafeRelative(ref.path)) continue
+    const exists = async (refresh: boolean) => (await listFiles($, root, refresh)).includes(ref.path)
+    if ((await exists(false)) || (await exists(true))) return { path: ref.path, start: ref.start, end: ref.end, head: false }
+  }
+  return null
+}
+
+// La respuesta solo toma el panel mientras este espera ese simbolo; si la persona ya paso a otra
+// cosa, un toast lo avisa.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function showAnswer($: any, answer: Answer) {
+  const current = (await read($, view)).answer
+  if (current?.symbol !== answer.symbol || current.status !== 'asking') {
+    $.ui.toast(answer.ref ? `${answer.symbol}: ubicado en ${answer.ref.path}:${answer.ref.start}` : `${answer.symbol}: sin ubicar`)
     return
   }
-  await update($, asking, (m: Record<string, string>) => ({ ...m, [r.agentId as string]: name }))
+  await setView($, { tab: 'code', ref: null, pending: null, missing: null, selected: null, symbol: answer.symbol, answer })
+  await bringToFront($)
 }
 
-// Primer link `code:` de la respuesta del subagente, dentro del repo.
-function firstCodeRef(text: string): RefSel | null {
-  const m = /\]\(code:([^)\s]+)\)/.exec(text)
-  const ref = m?.[1] ? parseCodeTarget(m[1]) : undefined
-  return ref && isSafeRelative(ref.path) ? { path: ref.path, start: ref.start, end: ref.end, head: false } : null
-}
-
-// Reporte del subagente: queda en el panel y, con link, el `?` del mensaje pasa a ser link.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function takeAnswer($: any, name: string, status: string, text: string) {
-  const ref = status === 'completed' ? firstCodeRef(text) : null
-  const answer: Answer = {
-    symbol: name,
-    status: status === 'completed' ? 'done' : 'failed',
-    text: text.trim() || (status === 'completed' ? 'Sin respuesta.' : `El subagente termino: ${status}.`),
-    ref,
-  }
+  const ref = status === 'completed' ? await codeRefFor($, text, name) : null
   if (ref) {
     await update($, resolved, (list: Resolution[]) =>
       list.map(r => (r.name === name && !r.ref ? { name: r.name, lines: r.lines, ref } : r)),
     )
   }
-  await setView($, { tab: 'code', ref: null, pending: null, missing: null, selected: null, symbol: name, answer })
-  await bringToFront($)
+  await showAnswer($, {
+    symbol: name,
+    status: status === 'completed' ? 'done' : 'failed',
+    text: text.trim() || (status === 'completed' ? 'Sin respuesta.' : `El subagente termino: ${status}.`),
+    ref,
+  })
 }
 
 async function isOn($: { store: { get: (k: string) => Promise<unknown> } }): Promise<boolean> {
@@ -337,8 +369,8 @@ async function record($: any, p: string | undefined, kind: 'E' | 'R') {
   })
 }
 
-// Foto de git al enviar un mensaje: archivos con cambios y su hash. Al terminar el turno se
-// compara con otra foto, asi cuenta todo lo modificado (Edit, sed, scripts, subagentes).
+// Foto de git al enviar el mensaje; al cerrar el turno se compara con otra, asi cuenta todo lo
+// modificado (Edit, sed, scripts, subagentes).
 let snapshot: { turn: number; hashes: Map<string, string> } | null = null
 
 async function dirtyHashes($: Sh, root: string): Promise<Map<string, string>> {
@@ -356,8 +388,6 @@ async function dirtyHashes($: Sh, root: string): Promise<Map<string, string>> {
   }
   return hashes
 }
-
-// ---- modulo -------------------------------------------------------------------
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -391,8 +421,7 @@ export const register: Register = on => {
     }
   })
 
-  // Un mensaje nuevo del usuario abre un "ultimo turno" vacio y, con el mod encendido, lleva
-  // la regla de links una sola vez (no gasta contexto en cada mensaje).
+  // La regla viaja una sola vez para no gastar contexto en cada mensaje.
   on('prompt.submit', async ($, e, next) => {
     if (e.command) return next(e)
     await update($, last, () => [] as Touch[])
@@ -417,7 +446,6 @@ export const register: Register = on => {
     return done
   })
 
-  // Registro de lo que toca el asistente (tras la ejecucion).
   on('tool.call', { tool: 'Edit' }, async ($, e, next) => {
     const ran = await next(e)
     if (ran.deny === undefined && ran.isError !== true) await record($, e.file_path, 'E')
@@ -436,7 +464,6 @@ export const register: Register = on => {
 
     return ran
   })
-  // Lo leido por shell: archivos del repo nombrados en el comando.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
     if (ran.deny !== undefined || ran.isError === true) return ran
@@ -444,16 +471,25 @@ export const register: Register = on => {
       const root = await getRoot($)
       for (const p of pathsInCommand(e.command, await listFiles($, root, false), root)) await record($, `${root}/${p}`, 'R')
     } catch {
-      // Sin repo o sin git: no hay nada que registrar.
     }
 
     return ran
   })
 
-  // El reporte de un subagente que ubica un simbolo se queda en el panel: el chat principal
-  // no recibe aviso ni turno nuevo.
+  // El subagente que ubica un simbolo solo lee: se niega todo lo que el motor no marca como
+  // lectura, salvo la herramienta con la que entrega su reporte. Un fallo al comprobar niega.
+  on('tool.check', async ($, e, next) => {
+    try {
+      if (e.isReadOnly || e.tool === HANDBACK_TOOL || !(await isOwnAgent($, e.agentId, next.origin.plugin))) return next(e)
+    } catch {
+      return { decision: 'deny', reason: 'code-refs: no se pudo comprobar el permiso.' }
+    }
+    return { decision: 'deny', reason: 'code-refs: este subagente solo puede leer; ubica el simbolo sin modificar nada.' }
+  })
+
+  // El reporte se consume: queda en el panel y el chat principal no recibe aviso ni turno nuevo.
   on('agent.report', async ($, e, next) => {
-    const name = (await read($, asking))[e.agentId]
+    const name = await askedSymbol($, e.agentId)
     if (name === undefined) return next(e)
     await update($, asking, (m: Record<string, string>) => {
       const { [e.agentId]: _, ...rest } = m
@@ -464,7 +500,6 @@ export const register: Register = on => {
     return { consumed: `code-refs: respuesta de ${name} mostrada en el panel` }
   })
 
-  // Fin del turno principal: lo que cambio en git desde la foto del mensaje es lo modificado.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     // En segundo plano: el turno termina ya y los links se completan al resolverse.
@@ -477,7 +512,6 @@ export const register: Register = on => {
       const root = await getRoot($)
       for (const p of changedBetween(start.hashes, await dirtyHashes($, root))) await record($, `${root}/${p}`, 'E')
     } catch {
-      // Sin repo o sin git: quedan solo los cambios hechos con las herramientas de archivos.
     }
 
     return done
@@ -490,8 +524,6 @@ export const register: Register = on => {
     return ran
   })
 
-  // Mensajes del asistente: referencias y simbolos pasan a ser links. Apagado => intacto,
-  // salvo los links `code:` ya escritos, que quedan como su etiqueta.
   on('ui.render', { component: 'AssistantMessage' }, async ($, e, next) => {
     const text = e.props.text
     if (typeof text !== 'string') return next(e)
@@ -524,9 +556,8 @@ export const register: Register = on => {
     )
   })
 
-  // El panel: cabecera fija (pestanas y, si hay, la linea de contexto) y debajo una ventana
-  // de contenido del alto justo. El motor no tiene contenedores con scroll propio, asi que
-  // el mod recorta las filas visibles y redirige a esa ventana el scroll del motor.
+  // El motor no tiene contenedores con scroll propio: el mod recorta las filas visibles a una
+  // ventana de contenido bajo la cabecera fija y redirige a ella el scroll del motor.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button, Code } = $.ui.resolve(e)
     const v = await read($, view)
@@ -571,7 +602,6 @@ export const register: Register = on => {
       body = lastBody($, el, rel(await read($, recent)), rel(await read($, recentReads)), fit.cols)
     }
 
-    // Filas de la ventana: las del panel menos la cabecera y la linea de contexto.
     const H = Math.max(1, fit.rows - 1 - (body.top ? 1 : 0))
     const maxOff = Math.max(0, body.total - H)
     const auto = body.center === undefined ? 0 : body.center - Math.floor(H / 2)
@@ -594,8 +624,8 @@ export const register: Register = on => {
     )
   })
 
-  // Scroll de la persona sobre el panel (rueda, flechas, AvPag/RePag, Inicio/Fin): mueve solo
-  // la ventana de contenido. El del propio mod (colocar la ventana del motor) pasa tal cual.
+  // El scroll de la persona mueve solo la ventana de contenido; el del propio mod (colocar la
+  // ventana del motor) pasa tal cual.
   on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
     if (e.origin.kind !== 'person' || !geom) return next(e)
     const g = geom
@@ -611,9 +641,7 @@ export const register: Register = on => {
   })
 }
 
-// ---- medidas ---------------------------------------------------------------------
-
-// Lo que el ultimo dibujo del panel midio; el hook de scroll lo lee para acotar el paso.
+// Lo que midio el ultimo dibujo; el hook de scroll lo lee para acotar el paso.
 let geom: { H: number; maxOff: number; off: number } | null = null
 
 // Filas y columnas del panel. Inline (pantalla principal) el marco crece con el arbol: si
@@ -646,8 +674,6 @@ type Body = {
   draw: (from: number, to: number) => RenderChildren
 }
 
-// ---- cuerpos del panel -------------------------------------------------------------
-
 // Elementos de la superficie; se pasan sueltos para no depender de una superficie concreta.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type El = Record<'Box' | 'Text' | 'Button' | 'Code', any>
@@ -669,16 +695,12 @@ async function readFileText($: Sh, root: string, sel: RefSel): Promise<{ ok: boo
   }
 }
 
-// Una sola linea de texto, sin desplazamiento posible.
 function staticBody(node: RenderChildren): Body {
   return { total: 1, draw: from => (from === 0 ? node : null) }
 }
 
-// Filas visibles de un tramo [a, b) dentro de la ventana [from, to).
 const span = (a: number, b: number, from: number, to: number): [number, number] => [Math.max(a, from), Math.min(b, to)]
 
-// Lo que respondio el subagente: mientras corre, un aviso; luego su texto y, si trajo link,
-// un boton que abre la definicion.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function answerBody($: any, el: El, a: Answer, cols: number): Body {
   const { Box, Text, Button } = el
@@ -719,7 +741,6 @@ function answerBody($: any, el: El, a: Answer, cols: number): Body {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function codeBody($: any, el: El, v: View, root: string, cols: number): Promise<Body> {
   const { Box, Text, Button, Code } = el
-  // Un simbolo que el agente no ubico: se le puede pedir que lo busque y responda exacto.
   const sym = v.symbol
   const ask = (label: string) => (
     <Box key="top" flexDirection="row">
@@ -758,7 +779,6 @@ async function codeBody($: any, el: El, v: View, root: string, cols: number): Pr
   const top = <Text key="top" bold wrap="truncate-start">{title}</Text>
   if (!file.ok) return { ...staticBody(<Text color="red">{file.text}</Text>), top }
 
-  // Todo el archivo como filas: antes, borde, citadas, borde, despues.
   const w = sliceWindow(file.text, sel.start, sel.end, 1_000_000)
   const B = w.before.length
   const C = w.cited.length
@@ -798,7 +818,7 @@ async function codeBody($: any, el: El, v: View, root: string, cols: number): Pr
   }
 }
 
-// Un archivo elegido en Changes o Last: su diff contra HEAD, o el archivo si es nuevo.
+/** Archivo elegido en Changes o Last: su diff contra HEAD, o el archivo si es nuevo. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function fileDiffBody($: any, el: El, v: View, root: string, cols: number): Promise<Body> {
   const { Box, Text, Button, Code } = el
@@ -873,7 +893,6 @@ async function changesBody($: any, el: El, sessionFiles: string[], root: string,
   const byPath = new Map<string, string>(changes.map(c => [c.path, c.status]))
   for (const p of sessionFiles) if (!byPath.has(p)) byPath.set(p, '  ')
   const sessionSet = new Set(sessionFiles)
-  // Primero lo editado en la sesion, luego el resto.
   const rows = [...byPath.entries()]
     .sort((a, b) => Number(sessionSet.has(b[0])) - Number(sessionSet.has(a[0])) || a[0].localeCompare(b[0]))
     .map(([p, status]) => ({
@@ -887,8 +906,6 @@ async function changesBody($: any, el: El, sessionFiles: string[], root: string,
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function lastBody($: any, el: El, mod: Section, reads: Section, cols: number): Body {
-  // Dos secciones: lo modificado (abre su diff) y lo leido (abre el archivo), cada una del
-  // mensaje mas reciente que modifico o leyo algo. Un archivo modificado no se repite abajo.
   const { Text, Button } = el
   const readOnly = reads.files.filter(p => !mod.files.includes(p))
   const items: ({ head: string } | Row)[] = [

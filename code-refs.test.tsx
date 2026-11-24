@@ -23,8 +23,6 @@ import {
   toHref,
 } from './hooks/lib'
 
-// ---- parseo de referencias ------------------------------------------------------
-
 test('parsea archivo:linea, rangos y HEAD:', () => {
   expect(parseRef('modal_document_expense_line.dart:145')).toEqual({
     path: 'modal_document_expense_line.dart', start: 145, end: 145, head: false,
@@ -47,7 +45,6 @@ test('reescribe en prosa, con backticks y puntuacion final', () => {
     ['lib/x/y.ts', 10, 12, false],
     ['a.dart', 9, 9, true],
   ])
-  // La puntuacion queda fuera del link y los backticks dentro del texto del link.
   expect(r.text).toContain('[`modal.dart:145`](https://code-refs.invalid/open?')
   expect(r.text).toMatch(/\[lib\/x\/y\.ts:10-12\]\([^)]*\)\. Luego/)
   expect(r.text).toMatch(/\(\[HEAD:a\.dart:9\]\([^)]*\)\)\./)
@@ -67,8 +64,6 @@ test('no enlaza urls ni versiones, y el href viaja ida y vuelta', () => {
   const ref = { path: 'lib/(grp)/[id].tsx', start: 3, end: 9, head: true }
   expect(fromHref(toHref(ref))).toEqual(ref)
 })
-
-// ---- resolucion de archivos ---------------------------------------------------
 
 const FILES = ['lib/a/modal.dart', 'lib/b/modal.dart', 'lib/a/unico.dart', 'lib/c/x/unico.dart.bak']
 
@@ -97,8 +92,6 @@ test('ventana de contexto y parseo de git', () => {
   expect(diffHunks('diff --git a/x b/x\nindex 1..2\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n')).toMatch(/^@@/)
   expect(diffHunks('Binary files differ')).toBe('')
 })
-
-// ---- hooks: apagado = intacto; encendido = links; panel -------------------------
 
 const MSG = {
   plugin: 'code-refs',
@@ -237,7 +230,6 @@ test('pulsar un nombre con varios archivos lista candidatos pulsables', async ($
   expect(await ui.findAll({ type: 'Button', key: 'cand-1' })).toHaveLength(1)
   expect(await ui.find({ type: 'Button', key: 'close' })).toBeDefined()
   expect(await ui.find({ type: 'Button', key: 'tab-changes' })).toBeDefined()
-  // Solo git de lectura.
   for (const argv of calls) expect(['rev-parse', 'ls-files', 'show', 'status', 'diff']).toContain(argv[1] as string)
   await ui.unmount()
   await msg.unmount()
@@ -268,8 +260,6 @@ test('un solo archivo se muestra con el rango citado', async ($, on) => {
   await ui.unmount()
   await msg.unmount()
 })
-
-// ---- simbolos ------------------------------------------------------------------------
 
 test('un span de codigo con un simbolo se enlaza por su ultimo identificador', () => {
   expect(symbolName('controller.state.document?.calculate()')).toBe('calculate')
@@ -315,8 +305,6 @@ test('una pagina del diff conserva cabeceras validas aunque corte un hunk', () =
   expect(q.text.split('\n')).toEqual(['@@ -13,1 +13,1 @@ class A', ' d', '@@ -50,1 +50,2 @@', ' x', '+y'])
 })
 
-// ---- pestana Last y medidas ---------------------------------------------------------
-
 test('Last muestra lo modificado en el mensaje mas reciente que modifico algo', async ($, on) => {
   wire(on as never, 'lib/a/modal.dart\n')
   on('tool.call', () => ({ result: { isError: false, text: 'ok' } }))
@@ -334,7 +322,6 @@ test('Last muestra lo modificado en el mensaje mas reciente que modifico algo', 
     return { keys, heads }
   }
 
-  // Mensaje 1: dos archivos modificados y uno leido, cada uno en su seccion.
   await $.prompt.submit({ text: 'uno', wait: false } as never)
   await $.tool.call({ tool: 'Read', file_path: '/repo/lib/r.dart' } as never)
   await edit('e.dart')
@@ -344,14 +331,12 @@ test('Last muestra lo modificado en el mensaje mas reciente que modifico algo', 
     heads: ['Modificados en tu ultimo mensaje', 'Leidos en tu ultimo mensaje'],
   })
 
-  // Mensaje 2: sin cambios; Last sigue mostrando los del mensaje 1.
   await $.prompt.submit({ text: 'dos', wait: false } as never)
   expect(await lastRows()).toEqual({
     keys: ['last-lib/e.dart', 'last-lib/f.dart', 'read-lib/r.dart'],
     heads: ['Modificados en tu mensaje anterior', 'Leidos en tu mensaje anterior'],
   })
 
-  // Mensaje 3: un cambio nuevo reemplaza la lista.
   await $.prompt.submit({ text: 'tres', wait: false } as never)
   await edit('g.dart')
   expect(await lastRows()).toEqual({
@@ -389,9 +374,7 @@ test('el contexto del mensaje pone primero la definicion citada', () => {
   const r = rewriteRefs('`line.calculate()` vive en document_expense_line.dart:460-469.')
   const link = symFromHref(r.hrefs.find(h => h.includes('y=')) as string)
   expect(orderByContext(hits, [link?.ctx ?? []])[0]).toEqual({ path: 'lib/doc/lines/document_expense_line.dart', line: 460 })
-  // Sin contexto que coincida, quedan todas y en el orden original.
   expect(orderByContext(hits, [[]])).toEqual(hits)
-  // Archivo citado sin rango que contenga la linea: ese archivo va primero.
   expect(orderByContext(hits, [[{ path: 'document_expense.dart', start: 10, end: 12, head: false }]])[0]).toEqual({
     path: 'lib/doc/document_expense.dart',
     line: 899,
@@ -408,15 +391,12 @@ test('un campo cuenta como definicion; un parametro con nombre no', () => {
   expect(isDefinition('    if (a == lineTotal) {', 'lineTotal')).toBe(false)
 })
 
-// ---- links explicitos del agente (code:) ------------------------------------------
-
 test('un link code: del agente se resuelve a su destino exacto', () => {
   expect(parseCodeTarget('lib/a/line.dart:460')).toEqual({ path: 'lib/a/line.dart', start: 460, end: 460, head: false })
   expect(parseCodeTarget('lib/a/line.dart:460-469')?.end).toBe(469)
   expect(parseCodeTarget('lib/a/line.dart')?.start).toBe(1)
   const r = rewriteRefs('Antes de [`line.calculate()`](code:lib/a/line.dart:460) va `otro()`.')
   expect(r.refs).toEqual([{ path: 'lib/a/line.dart', start: 460, end: 460, head: false }])
-  // La etiqueta queda igual y el destino pasa a ser un link del mod; no se busca como simbolo.
   expect(r.text).toContain('[`line.calculate()`](https://code-refs.invalid/open?p=lib%2Fa%2Fline.dart&s=460&e=460&h=0)')
   expect(r.syms).toEqual(['otro'])
   expect(r.text).not.toContain('code:')
@@ -443,8 +423,6 @@ test('apagado: los links code: quedan como su etiqueta', async ($, on) => {
   expect((await ui.find({ type: 'Markdown' }))?.text).toBe('ver `a.b()` ya')
   await ui.unmount()
 })
-
-// ---- regla para el agente: contexto oculto, una sola vez, solo encendido ------------
 
 function wireSubmit(on: (...a: any[]) => unknown, enabled: boolean) {
   const held = new Map<string, unknown>()
@@ -537,13 +515,11 @@ test('una mencion sin link nunca abre sola si hay varias definiciones: lista con
     return RUN('', 1)
   })
 
-  // Trozo 1: la tabla con el link exacto.
   const table = await $.ui.mount({
     ...MSG,
     props: { text: '| | [`line.calculate()`](code:lib/doc/lines/document_expense_line.dart:460-469) |\n|---|---|', isFirstOfReply: true },
     surface: 'terminal',
   })
-  // Trozo 2: la frase de abajo, sola, sin referencias.
   const prose = await $.ui.mount({
     ...MSG,
     props: { text: 'Por eso se reemplaza por `line.calculate()` y listo.', isFirstOfReply: false },
@@ -574,8 +550,6 @@ test('ordenar por contexto no descarta candidatos', () => {
   expect(orderByContext(hits, [])).toHaveLength(3)
 })
 
-// ---- lo tocado fuera de las herramientas de archivos ------------------------------
-
 test('la foto de git detecta archivos nuevos, editados y revertidos', () => {
   const before = new Map([['a.dart', 'h1'], ['b.dart', 'h2'], ['c.dart', 'h3']])
   const after = new Map([['a.dart', 'h1'], ['b.dart', 'h9'], ['d.dart', 'h4']])
@@ -588,7 +562,6 @@ test('los archivos nombrados en un comando de shell cuentan como leidos', () => 
     'lib/a/modal.dart',
     'lib/a/unico.dart',
   ])
-  // Ambiguo (dos modal.dart), una url y un archivo fuera del repo: no cuentan.
   expect(pathsInCommand('cat modal.dart; curl https://x.io/a.json; cat /otro/z.ts', files, '/repo')).toEqual([])
   expect(pathsInCommand('sed -n 1,20p /repo/docs/x.md', files, '/repo')).toEqual(['docs/x.md'])
 })
@@ -607,8 +580,6 @@ test('la busqueda de simbolos incluye archivos nuevos que git aun no rastrea', a
   expect(grep).toContain('--untracked')
   await msg.unmount()
 })
-
-// ---- simbolos sin link: deteccion y resolucion --------------------------------
 
 test('HEAD no es un simbolo de codigo', () => {
   expect(symbolName('HEAD')).toBeUndefined()
@@ -643,7 +614,6 @@ test('la consulta al modelo solo admite candidatos de la lista', () => {
   expect(got.get('cardNameSupplier')).toEqual({ path: 'lib/doc.dart', line: 40 })
   expect(got.get('otro')).toBeNull()
   expect(got.has('inventado')).toBe(false)
-  // Un numero fuera de rango no elige nada.
   expect(parseForkAnswer('otro: 7', asks).get('otro')).toBeNull()
 })
 
@@ -687,6 +657,61 @@ test('un simbolo con una sola definicion se resuelve sin consultar al modelo', a
   await msg.unmount()
 })
 
+const EMPTY_PANE_VIEW = { tab: 'code', ref: null, pending: null, missing: null, selected: null, offset: 0, symbol: null, answer: null }
+
+const ASKING_VIEW = (symbol: string) => ({
+  ...EMPTY_PANE_VIEW, symbol, answer: { symbol, status: 'asking', text: '', ref: null },
+})
+
+function seedAsking(held: Map<string, unknown>, agentId: string, symbol: string, view: unknown = ASKING_VIEW(symbol)) {
+  held.set('asking', { shape: 'asking-1', value: { [agentId]: symbol } })
+  held.set('view', { shape: 'view-4', value: view })
+}
+
+const reportOf = (agentId: string, text: string) =>
+  ({ agentId, subagentType: 'fork', provider: { plugin: 'engine', tier: 'core' }, status: 'completed', text }) as never
+
+test('el subagente que ubica un simbolo no puede escribir', async ($, on) => {
+  const { held } = wire(on as never, 'lib/b/doc.dart\n')
+  on('tool.check', () => ({ decision: 'allow' }))
+  seedAsking(held, 'loc-1', 'cardNameSupplier')
+  const edit = { tool: 'Edit', input: { file_path: 'lib/b/doc.dart', old_string: 'a', new_string: 'b' } }
+
+  expect((await $.tool.check({ ...edit, agentId: 'loc-1' } as never)).decision).toBe('deny')
+  expect((await $.tool.check({ tool: 'Read', input: { file_path: 'lib/b/doc.dart' }, agentId: 'loc-1', isReadOnly: true } as never)).decision).toBe('allow')
+  expect((await $.tool.check({ tool: 'SubagentHandback', input: {}, agentId: 'loc-1' } as never)).decision).toBe('allow')
+  expect((await $.tool.check({ ...edit, agentId: 'otro' } as never)).decision).toBe('allow')
+  expect((await $.tool.check(edit as never)).decision).toBe('allow')
+})
+
+test('la respuesta no reemplaza el panel si la persona ya miraba otra cosa', async ($, on) => {
+  const { held } = wire(on as never, 'lib/b/doc.dart\n')
+  const toasts: string[] = []
+  on('ui.toast', (_: unknown, e: { text: string }) => (toasts.push(e.text), { value: undefined }))
+  const other = { ...EMPTY_PANE_VIEW, ref: { path: 'lib/b/doc.dart', start: 1, end: 1, head: false } }
+  seedAsking(held, 'loc-1', 'cardNameSupplier', other)
+
+  const report = await $.agent.report(reportOf('loc-1', '[`cardNameSupplier`](code:lib/b/doc.dart:40)'))
+  await settle()
+
+  expect(report.consumed).toBeDefined()
+  expect((held.get('view') as { value: unknown }).value).toEqual(other)
+  expect(toasts.at(-1)).toContain('lib/b/doc.dart:40')
+})
+
+test('solo un link al simbolo pedido y a un archivo del repo resuelve la respuesta', async ($, on) => {
+  const { held } = wire(on as never, 'lib/a/approval.dart\nlib/b/doc.dart\n')
+  seedAsking(held, 'loc-1', 'cardNameSupplier')
+
+  await $.agent.report(reportOf('loc-1', '[`other`](code:lib/a/approval.dart:4) y [`cardNameSupplier`](code:lib/zz/missing.dart:1)'))
+  await settle()
+
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /Respuesta para cardNameSupplier/ })).toBeDefined()
+  expect(await ui.find({ key: 'open-answer' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('si el modelo no elige, pedirlo lo resuelve un subagente y la respuesta queda en el panel', async ($, on) => {
   const grep = 'lib/a/approval.dart:4:  String? cardNameSupplier;\nlib/b/doc.dart:40:  String? cardNameSupplier;\n'
   const { held } = wire(on as never, 'lib/a/approval.dart\nlib/b/doc.dart\n', undefined, grep)
@@ -710,30 +735,21 @@ test('si el modelo no elige, pedirlo lo resuelve un subagente y la respuesta que
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'ask-agent' })
   await settle()
-  // El pedido no pasa por el chat principal: lo lleva un fork en segundo plano.
   expect(sent).toHaveLength(0)
+  // El kit entrega a este stub la entrada con la forma de la herramienta Agent
+  // (`subagent_type`, `run_in_background`), no la de AgentSpawnInput.
   expect(spawned).toHaveLength(1)
   expect(spawned[0]?.subagent_type).toBe('fork')
-  expect(spawned[0]?.run_in_background).toBe(true)
   expect(spawned[0]?.prompt).toContain('cardNameSupplier')
   await ui.unmount()
-  // El kit no devuelve el agentId de un stub (solo lo pone el motor real): se siembra lo que
-  // el mod habria guardado y el panel en espera que habria dibujado.
-  held.set('asking', { shape: 'asking-1', value: { 'loc-1': 'cardNameSupplier' } })
-  held.set('view', { shape: 'view-4', value: {
-    tab: 'code', ref: null, pending: null, missing: null, selected: null, offset: 0, symbol: 'cardNameSupplier',
-    answer: { symbol: 'cardNameSupplier', status: 'asking', text: '', ref: null },
-  } })
-  // El estado del mock no avisa de cambios: se vuelve a montar el panel para leerlo.
+  // Limite del kit: descarta el agentId que devuelve un stub (solo lo pone el motor), asi
+  // que guardar el id tras el spawn no se puede probar aqui; se siembra ese estado.
+  seedAsking(held, 'loc-1', 'cardNameSupplier')
   const waiting = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await waiting.find({ type: 'Text', text: /Ubicando cardNameSupplier/ })).toBeDefined()
   await waiting.unmount()
 
-  // Su reporte se consume (el chat principal no recibe aviso) y se muestra en el panel.
-  const report = await $.agent.report({
-    agentId: 'loc-1', subagentType: 'fork', provider: { plugin: 'engine', tier: 'core' }, status: 'completed',
-    text: '[`cardNameSupplier`](code:lib/b/doc.dart:40)\nCampo del documento.',
-  } as never)
+  const report = await $.agent.report(reportOf('loc-1', '[`cardNameSupplier`](code:lib/b/doc.dart:40)\nCampo del documento.'))
   await settle()
   expect(report.consumed).toBeDefined()
   const shown = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -746,7 +762,6 @@ test('si el modelo no elige, pedirlo lo resuelve un subagente y la respuesta que
   await opened.unmount()
   await msg.unmount()
 
-  // El `?` del mensaje pasa a ser link a la definicion que trajo el subagente.
   const again = await $.ui.mount({ ...MSG, props: { text: answer, isFirstOfReply: true }, surface: 'terminal' })
   expect(String((await again.find({ type: 'Markdown' }))?.text)).not.toContain('`cardNameSupplier`?')
   await again.unmount()

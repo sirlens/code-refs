@@ -35,7 +35,7 @@ export type Answer = { symbol: string; status: 'asking' | 'done' | 'failed'; tex
 /**
  * Simbolo que el agente dejo sin link, ya resuelto al terminar su respuesta. `lines` son las
  * lineas donde aparece (asi se reconoce en el mensaje dibujado); `ref` su definicion, o null
- * si nadie la eligio; `none` si el repo no tiene ninguna definicion (no es codigo).
+ * si nadie la eligio; `none` si el repo no tiene ninguna definicion (se marca con `?` para pedirle al agente que lo ubique).
  */
 export type Resolution = { name: string; lines: string[]; ref: RefSel | null; none?: true }
 

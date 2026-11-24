@@ -39,8 +39,6 @@ export function fromHref(href: string): Ref | undefined {
   return { path, start, end, head: q.get('h') === '1' }
 }
 
-// ---- simbolos: `foo()`, `a.b?.calc()`, `Clase` ---------------------------------
-
 const SYM_SPAN = /^[A-Za-z_$][\w$]*(?:!?\??\.[A-Za-z_$][\w$]*|\(\)|!)*(?:\([^()`]*\))?;?$/
 const NOT_SYMBOLS = new Set([
   'true', 'false', 'null', 'undefined', 'this', 'super', 'void', 'var', 'final', 'const', 'late', 'return',
@@ -136,7 +134,7 @@ export function parseRef(text: string): Ref | undefined {
 /** Un simbolo que el agente dejo sin link `code:` y la linea (recortada) donde aparece. */
 export type SymLine = { name: string; line: string }
 
-/** Lo que se sabe de un simbolo sin link: su destino, o que no tiene definicion en el repo. */
+/** Lo que se sabe de un simbolo sin link: su destino, o `none` si el repo no tiene definicion (se marca con `?`). */
 export type SymStatus = { ref?: Ref; none?: boolean }
 export type Resolver = (name: string, line: string) => SymStatus | undefined
 
@@ -199,7 +197,6 @@ export function hasCodeLinks(text: string): boolean {
   return found
 }
 
-// Prosa: parte entre bloques de codigo cercados.
 function rewriteProse(prose: string, acc: Acc, resolve?: Resolver): string {
   return prose
     .split('\n')
@@ -210,7 +207,6 @@ function rewriteProse(prose: string, acc: Acc, resolve?: Resolver): string {
 function rewriteLine(line: string, acc: Acc, resolve?: Resolver): string {
   const { refs, syms, links } = acc
   const key = line.trim()
-  // Primero los links que escribio el agente: su destino es exacto.
   const withMarks = line.replace(CODE_LINK, (whole: string, label: string, target: string) => {
     const ref = parseCodeTarget(target)
     if (!ref) return label
@@ -218,7 +214,6 @@ function rewriteLine(line: string, acc: Acc, resolve?: Resolver): string {
     links.push(`[${label}](${toHref(ref)})`)
     return LINK_MARK(links.length - 1)
   })
-  // Los spans `...` se enlazan si son exactamente una referencia o un simbolo.
   return withMarks
     .split(/(`[^`\n]*`)/)
     .map(part => {
@@ -285,8 +280,6 @@ export function rewriteRefs(text: string, resolve?: Resolver): Rewrite {
   const hrefs = [...new Set([...refs.map(toHref), ...symHrefs])].slice(0, 256)
   return { text: joined, refs, syms, hrefs, symLines: acc.symLines, unresolved: acc.unresolved }
 }
-
-// ---- resolucion de simbolos sin link con el modelo -------------------------------
 
 export type Ask = { name: string; cands: readonly Hit[] }
 
@@ -366,7 +359,6 @@ export function sliceWindow(
     const size = last - first + 1
     first = Math.min(Math.max(1, first + shift), Math.max(1, total - size + 1))
     last = Math.min(total, first + size - 1)
-    // Fuera de la ventana el rango citado no se resalta.
     return {
       first,
       before: lines.slice(first - 1, Math.min(Math.max(first - 1, s - 1), last)),
@@ -441,7 +433,6 @@ export function diffPage(hunks: string, offset: number, size: number): { text: s
   const out: string[] = []
   let i = 0
   while (i < page.length) {
-    // Un trozo contiguo: hasta que cambie el hunk de origen.
     const start = page[i] as Row
     let j = i
     let co = 0

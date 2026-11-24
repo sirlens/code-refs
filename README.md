@@ -32,7 +32,7 @@ With the mod off, answers are shown as Claude wrote them.
 - **Files:** reads the file you open in the pane. Nothing is written.
 - **Model calls:** `model.fork`, only when an answer mentions a symbol without a link and the repository has several definitions of it. The fork inherits the current conversation, runs on your model and counts as a side request; its prompt lists the symbol names and the candidate `path:line` entries, and only an answer that is a number from that list is accepted.
 - **Your messages:** while the mod is on, the first message of a conversation carries a short hidden rule asking Claude to write symbols as `code:` links. It is sent again after `/clear` or a compaction.
-- **Subagents:** **Pedir al agente** spawns a background `fork` subagent (it inherits the conversation and its tools, and is told not to edit files). Its report is consumed by the mod and shown in the pane, so the main chat gets no notice and no new turn.
+- **Subagents:** **Pedir al agente** spawns a background `fork` subagent (it inherits the conversation and its tools). It is read-only: the mod denies every tool call of it that the engine does not mark as read-only. Its report is consumed by the mod and shown in the pane, so the main chat gets no notice and no new turn. Only a link labelled with the requested symbol, to a file the repository has, resolves the `?`; if you have moved on in the pane meanwhile, a toast reports the answer instead.
 - **Stored:** only the on/off setting. Everything else (opened file, lists of touched files) lives in the session and is lost when it ends.
 - **Network:** none.
 
