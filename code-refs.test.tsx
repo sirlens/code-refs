@@ -191,7 +191,7 @@ function wire(on: (...a: any[]) => unknown, files: string, opens?: unknown[], gr
     return RUN('', 1)
   })
 
-  return calls
+  return Object.assign(calls, { held })
 }
 
 async function pressRef(ui: any, text: string) {
@@ -619,17 +619,16 @@ test('cada simbolo sin link se reporta con la linea donde aparece', () => {
   expect(r.symLines).toEqual([{ name: 'cardNameSupplier', line: 'El campo `cardNameSupplier` va al pie.' }])
 })
 
-test('con resolucion: exacto se enlaza al destino, sin definicion queda como codigo, sin resolver lleva marca', () => {
+test('con resolucion: exacto se enlaza al destino; sin definicion o sin resolver lleva marca', () => {
   const ref = { path: 'lib/doc.dart', start: 40, end: 40, head: false }
-  const text = 'Usa `exacto`, `noEsCodigo` y `pendiente`.'
+  const text = 'Usa `exacto`, `sinDefinicion` y `pendiente`.'
   const r = rewriteRefs(text, name =>
-    name === 'exacto' ? { ref } : name === 'noEsCodigo' ? { none: true } : undefined,
+    name === 'exacto' ? { ref } : name === 'sinDefinicion' ? { none: true } : undefined,
   )
   expect(r.text).toContain(`[\`exacto\`](${toHref(ref)})`)
-  expect(r.text).toContain('`noEsCodigo`')
-  expect(r.text).not.toMatch(/\[`noEsCodigo`\]/)
+  expect(r.text).toMatch(/\[`sinDefinicion`\?\]\(https:\/\/code-refs\.invalid\/open\?y=sinDefinicion/)
   expect(r.text).toMatch(/\[`pendiente`\?\]\(https:\/\/code-refs\.invalid\/open\?y=pendiente/)
-  expect(r.unresolved).toEqual(['pendiente'])
+  expect(r.unresolved).toEqual(['sinDefinicion', 'pendiente'])
 })
 
 test('la consulta al modelo solo admite candidatos de la lista', () => {
@@ -688,12 +687,16 @@ test('un simbolo con una sola definicion se resuelve sin consultar al modelo', a
   await msg.unmount()
 })
 
-test('si el modelo no elige, el panel ofrece pedirle al agente que lo ubique', async ($, on) => {
+test('si el modelo no elige, pedirlo lo resuelve un subagente y la respuesta queda en el panel', async ($, on) => {
   const grep = 'lib/a/approval.dart:4:  String? cardNameSupplier;\nlib/b/doc.dart:40:  String? cardNameSupplier;\n'
-  wire(on as never, 'lib/a/approval.dart\nlib/b/doc.dart\n', undefined, grep)
+  const { held } = wire(on as never, 'lib/a/approval.dart\nlib/b/doc.dart\n', undefined, grep)
   on('model.fork', () => ({ value: { isAnswered: true, text: 'cardNameSupplier: 0', usage: {} } }))
   const sent: string[] = []
   on('prompt.submit', (_: unknown, e: { text: string }) => (sent.push(e.text), { text: e.text }))
+  const spawned: Array<{ prompt: string; subagent_type?: string; run_in_background?: boolean }> = []
+  on('agent.spawn', (_: unknown, e: { prompt: string; subagent_type?: string; run_in_background?: boolean }) => (
+    spawned.push(e), { model: 'sonnet', agentId: 'loc-1' }
+  ))
   const answer = 'El campo `cardNameSupplier` va al pie.'
   on('turn.complete', () => ({ text: '' }))
   await $.turn.complete({ answer, reason: 'answer', durationMs: 1, isAborted: false, turnId: 't1' } as never)
@@ -707,7 +710,44 @@ test('si el modelo no elige, el panel ofrece pedirle al agente que lo ubique', a
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   await ui.press({ key: 'ask-agent' })
   await settle()
-  expect(sent.at(-1)).toContain('cardNameSupplier')
+  // El pedido no pasa por el chat principal: lo lleva un fork en segundo plano.
+  expect(sent).toHaveLength(0)
+  expect(spawned).toHaveLength(1)
+  expect(spawned[0]?.subagent_type).toBe('fork')
+  expect(spawned[0]?.run_in_background).toBe(true)
+  expect(spawned[0]?.prompt).toContain('cardNameSupplier')
   await ui.unmount()
+  // El kit no devuelve el agentId de un stub (solo lo pone el motor real): se siembra lo que
+  // el mod habria guardado y el panel en espera que habria dibujado.
+  held.set('asking', { shape: 'asking-1', value: { 'loc-1': 'cardNameSupplier' } })
+  held.set('view', { shape: 'view-4', value: {
+    tab: 'code', ref: null, pending: null, missing: null, selected: null, offset: 0, symbol: 'cardNameSupplier',
+    answer: { symbol: 'cardNameSupplier', status: 'asking', text: '', ref: null },
+  } })
+  // El estado del mock no avisa de cambios: se vuelve a montar el panel para leerlo.
+  const waiting = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await waiting.find({ type: 'Text', text: /Ubicando cardNameSupplier/ })).toBeDefined()
+  await waiting.unmount()
+
+  // Su reporte se consume (el chat principal no recibe aviso) y se muestra en el panel.
+  const report = await $.agent.report({
+    agentId: 'loc-1', subagentType: 'fork', provider: { plugin: 'engine', tier: 'core' }, status: 'completed',
+    text: '[`cardNameSupplier`](code:lib/b/doc.dart:40)\nCampo del documento.',
+  } as never)
+  await settle()
+  expect(report.consumed).toBeDefined()
+  const shown = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await shown.find({ type: 'Text', text: /Campo del documento/ })).toBeDefined()
+  await shown.press({ key: 'open-answer' })
+  await settle()
+  await shown.unmount()
+  const opened = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await opened.find({ type: 'Text', text: /lib\/b\/doc\.dart:40/ })).toBeDefined()
+  await opened.unmount()
   await msg.unmount()
+
+  // El `?` del mensaje pasa a ser link a la definicion que trajo el subagente.
+  const again = await $.ui.mount({ ...MSG, props: { text: answer, isFirstOfReply: true }, surface: 'terminal' })
+  expect(String((await again.find({ type: 'Markdown' }))?.text)).not.toContain('`cardNameSupplier`?')
+  await again.unmount()
 })

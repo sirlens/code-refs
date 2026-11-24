@@ -1,11 +1,12 @@
 import { atom, read, update } from 'claude-code'
 import type { Register, RenderChildren } from 'claude-code'
 
-import type { Recent, RefSel, Resolution, Tab, Touch, View } from '../types'
+import type { Answer, Recent, RefSel, Resolution, Tab, Touch, View } from '../types'
 import {
   definitionHits,
   forkPrompt,
   parseForkAnswer,
+  parseCodeTarget,
   orderByContext,
   diffHunks,
   diffPage,
@@ -29,10 +30,13 @@ const PANE = 'code-refs'
 const ENABLED_KEY = 'enabled'
 const MAX_CANDIDATES = 50
 
-const EMPTY_VIEW: View = { tab: 'code', ref: null, pending: null, missing: null, selected: null, offset: 0, symbol: null }
+const EMPTY_VIEW: View = {
+  tab: 'code', ref: null, pending: null, missing: null, selected: null, offset: 0, symbol: null, answer: null,
+}
 
 // Si cambian los campos de View, subir la etiqueta: rechaza lo que guardo una version anterior.
-const view = atom({ plugin: 'code-refs', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-3' })
+const view = atom({ plugin: 'code-refs', key: 'view' } as const, EMPTY_VIEW, { shape: 'view-4' })
+const asking = atom({ plugin: 'code-refs', key: 'asking' } as const, {} as Record<string, string>, { shape: 'asking-1' })
 const resolved = atom({ plugin: 'code-refs', key: 'resolved' } as const, [] as Resolution[], { shape: 'resolved-1' })
 const edited = atom({ plugin: 'code-refs', key: 'edited' } as const, [] as string[], {
   shape: 'edited-1',
@@ -57,9 +61,10 @@ const AGENT_RULE = [
   '[`line.calculate()`](code:lib/a/document_expense_line.dart:460). The target is hidden from the reader, so',
   'do not repeat the path. Before you answer, look up the definition of every symbol you mention whose',
   'location you have not verified in this conversation (CodeGraph or grep); never leave a symbol in backticks',
-  'without its link. If after looking you still cannot locate it, write it without backticks. Point at the',
-  'definition unless you mean a call site. Link every mention, repeated ones included. Never inside fenced code',
-  'blocks. Symbols you leave unlinked are flagged to the user as not looked up.',
+  'without its link. Point at the definition unless you mean a call site. Link every mention, repeated ones',
+  'included. Never inside fenced code blocks. The reader must always be able to open what you mention, so',
+  'verify and link each symbol as you write. If after looking you still cannot locate one, keep it in',
+  'backticks without a link: the reader sees it marked with `?` and can ask you to locate it.',
 ].join(' ')
 
 type Sh = {
@@ -124,7 +129,7 @@ async function pinWindow($: any) {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function showResult($: any, name: string, items: RefSel[], symbol: string | null = null) {
-  const base = { tab: 'code' as const, selected: null, symbol }
+  const base = { tab: 'code' as const, selected: null, symbol, answer: null }
   if (items.length === 0) {
     await setView($, { ...base, ref: null, pending: null, missing: name })
   } else if (items.length === 1) {
@@ -211,8 +216,8 @@ const MAX_ASKS = 15
 const MAX_ASK_CANDIDATES = 40
 
 // Al terminar una respuesta: cada simbolo sin link se busca en git; con una sola definicion
-// queda resuelto, sin ninguna se marca como no-codigo, y los ambiguos se le preguntan juntos al
-// modelo, que solo elige de la lista real. Lo que nadie elige queda marcado con `?`.
+// queda resuelto, y los ambiguos se le preguntan juntos al modelo, que solo elige de la lista
+// real. Lo que queda sin definicion, o sin elegir, se marca con `?` para pedirlo al agente.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function resolveReply($: any, answer: string) {
   const rw = rewriteRefs(answer)
@@ -253,11 +258,54 @@ function resolverFrom(list: readonly Resolution[]): Resolver {
   }
 }
 
+// El pedido corre en un subagente en segundo plano (fork: hereda la conversacion, asi sabe
+// donde se menciono el simbolo); su reporte se muestra en el panel y no llega al chat principal.
+const askPrompt = (name: string) =>
+  [
+    `Locate the definition of \`${name}\` that you mentioned in your last answer (CodeGraph or grep).`,
+    'Do not edit any file. Reply briefly, in the language of the conversation: first line exactly',
+    `[\`${name}\`](code:<repo-relative path>:<line>), then one line saying what it is.`,
+    'If it has no definition in the repository (not code, or external), say so in one line, with no link.',
+  ].join(' ')
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function askAgent($: any, name: string) {
-  await $.prompt.submit({
-    text: `Ubica la definicion de \`${name}\` que mencionaste en tu respuesta anterior y respondeme con su link code: exacto.`,
-  })
+  const answer: Answer = { symbol: name, status: 'asking', text: '', ref: null }
+  await setView($, { tab: 'code', ref: null, pending: null, missing: null, selected: null, symbol: name, answer })
+  const r = await $.agent
+    .spawn({ prompt: askPrompt(name), subagentType: 'fork', description: `Ubicar ${name}` })
+    .catch((err: unknown) => ({ deny: String(err) }))
+  if (r.deny !== undefined || !r.agentId) {
+    await setView($, { answer: { ...answer, status: 'failed', text: `No se pudo lanzar el subagente: ${r.deny ?? 'sin id'}` } })
+    return
+  }
+  await update($, asking, (m: Record<string, string>) => ({ ...m, [r.agentId as string]: name }))
+}
+
+// Primer link `code:` de la respuesta del subagente, dentro del repo.
+function firstCodeRef(text: string): RefSel | null {
+  const m = /\]\(code:([^)\s]+)\)/.exec(text)
+  const ref = m?.[1] ? parseCodeTarget(m[1]) : undefined
+  return ref && isSafeRelative(ref.path) ? { path: ref.path, start: ref.start, end: ref.end, head: false } : null
+}
+
+// Reporte del subagente: queda en el panel y, con link, el `?` del mensaje pasa a ser link.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function takeAnswer($: any, name: string, status: string, text: string) {
+  const ref = status === 'completed' ? firstCodeRef(text) : null
+  const answer: Answer = {
+    symbol: name,
+    status: status === 'completed' ? 'done' : 'failed',
+    text: text.trim() || (status === 'completed' ? 'Sin respuesta.' : `El subagente termino: ${status}.`),
+    ref,
+  }
+  if (ref) {
+    await update($, resolved, (list: Resolution[]) =>
+      list.map(r => (r.name === name && !r.ref ? { name: r.name, lines: r.lines, ref } : r)),
+    )
+  }
+  await setView($, { tab: 'code', ref: null, pending: null, missing: null, selected: null, symbol: name, answer })
+  await bringToFront($)
 }
 
 async function isOn($: { store: { get: (k: string) => Promise<unknown> } }): Promise<boolean> {
@@ -315,7 +363,7 @@ export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({
       name: 'code-refs',
-      description: 'Activa/desactiva links de codigo en las respuestas (sin argumento alterna; on, off, open)',
+      description: 'Activa/desactiva links de codigo en las respuestas (sin argumento alterna; on, off)',
     })
     // Tras /clear, compactar o reanudar, la regla anterior puede ya no estar en la conversacion.
     await update($, ruleSent, () => false)
@@ -326,7 +374,7 @@ export const register: Register = on => {
   on('command.run', { command: 'code-refs' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
     const was = await isOn($)
-    const want = arg === 'on' ? true : arg === 'off' ? false : arg === 'open' ? true : !was
+    const want = arg === 'on' ? true : arg === 'off' ? false : !was
 
     await $.store.set(ENABLED_KEY, want)
     await update($, ruleSent, () => false)
@@ -400,6 +448,20 @@ export const register: Register = on => {
     }
 
     return ran
+  })
+
+  // El reporte de un subagente que ubica un simbolo se queda en el panel: el chat principal
+  // no recibe aviso ni turno nuevo.
+  on('agent.report', async ($, e, next) => {
+    const name = (await read($, asking))[e.agentId]
+    if (name === undefined) return next(e)
+    await update($, asking, (m: Record<string, string>) => {
+      const { [e.agentId]: _, ...rest } = m
+      return rest
+    })
+    await takeAnswer($, name, e.status, e.text)
+
+    return { consumed: `code-refs: respuesta de ${name} mostrada en el panel` }
   })
 
   // Fin del turno principal: lo que cambio en git desde la foto del mensaje es lo modificado.
@@ -615,6 +677,45 @@ function staticBody(node: RenderChildren): Body {
 // Filas visibles de un tramo [a, b) dentro de la ventana [from, to).
 const span = (a: number, b: number, from: number, to: number): [number, number] => [Math.max(a, from), Math.min(b, to)]
 
+// Lo que respondio el subagente: mientras corre, un aviso; luego su texto y, si trajo link,
+// un boton que abre la definicion.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function answerBody($: any, el: El, a: Answer, cols: number): Body {
+  const { Box, Text, Button } = el
+  if (a.status === 'asking') {
+    return {
+      ...staticBody(<Text dimColor>El subagente esta buscando la definicion; la respuesta aparece aqui.</Text>),
+      top: <Text key="top" bold wrap="truncate-end">{`Ubicando ${a.symbol}…`}</Text>,
+    }
+  }
+  const ref = a.ref
+  const top = (
+    <Box key="top" flexDirection="row">
+      <Box flexGrow={1} flexShrink={1}>
+        <Text bold color={a.status === 'failed' ? 'red' : undefined} wrap="truncate-end">
+          {`Respuesta para ${a.symbol}`}
+        </Text>
+      </Box>
+      {ref && (
+        <Button key="open-answer" onPress={() => setView($, { answer: null, symbol: null, ref })}>
+          {clip([`Abrir ${ref.path}:${ref.start}`], Math.max(10, cols - 20))}
+        </Button>
+      )}
+    </Box>
+  )
+  const lines = a.text.split('\n')
+  return {
+    top,
+    total: lines.length,
+    draw: (from, to) =>
+      lines.slice(from, to).map((l, i) => (
+        <Text key={`ans-${from + i}`} wrap="wrap">
+          {l || ' '}
+        </Text>
+      )),
+  }
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 async function codeBody($: any, el: El, v: View, root: string, cols: number): Promise<Body> {
   const { Box, Text, Button, Code } = el
@@ -632,6 +733,7 @@ async function codeBody($: any, el: El, v: View, root: string, cols: number): Pr
       )}
     </Box>
   )
+  if (v.answer) return answerBody($, el, v.answer, cols)
   if (v.missing) return { ...staticBody(<Text color="red">No encontrado: {v.missing}</Text>), top: sym ? ask('') : undefined }
   if (v.pending) {
     const p = v.pending

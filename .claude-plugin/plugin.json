@@ -1,6 +1,6 @@
 {
   "name": "code-refs",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Turns file:line references and code symbols in Claude's answers into clickable links that open the code, and the changes of the session, in a side pane. Read-only on your files; one small model call to disambiguate symbols.",
   "author": {
     "name": "sirlens",

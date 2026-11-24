@@ -233,7 +233,6 @@ function rewriteLine(line: string, acc: Acc, resolve?: Resolver): string {
         if (!sym) return part
         acc.symLines.push({ name: sym, line: key })
         const st = resolve?.(sym, key)
-        if (st?.none) return part
         if (st?.ref) {
           refs.push(st.ref)
           return `[\`${escLabel(inner)}\`](${toHref(st.ref)})`

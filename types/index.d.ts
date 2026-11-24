@@ -22,7 +22,15 @@ export type View = {
   offset: number
   /** Simbolo sin link exacto que se esta mostrando: el panel ofrece pedir al agente que lo ubique. */
   symbol: string | null
+  /** Respuesta del subagente al que se le pidio ubicar un simbolo; se muestra en el panel. */
+  answer: Answer | null
 }
+
+/**
+ * Pedido a un subagente para ubicar `symbol`: `asking` mientras corre; luego su texto y,
+ * si respondio con un link `code:`, la referencia que abre.
+ */
+export type Answer = { symbol: string; status: 'asking' | 'done' | 'failed'; text: string; ref: RefSel | null }
 
 /**
  * Simbolo que el agente dejo sin link, ya resuelto al terminar su respuesta. `lines` son las
@@ -55,6 +63,8 @@ declare module 'claude-code' {
       recentReads: Shaped<Recent>
       /** Simbolos sin link resueltos al terminar cada respuesta. */
       resolved: Shaped<Resolution[]>
+      /** Subagentes que ubican un simbolo: id del agente -> simbolo pedido. */
+      asking: Shaped<Record<string, string>>
     }
   }
 }
